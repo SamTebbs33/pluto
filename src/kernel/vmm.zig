@@ -715,6 +715,33 @@ test "alloc and free" {
     }
 }
 
+test "alloc at a specific address" {
+    const num_entries = 100;
+    var vmm = try testInit(num_entries);
+    defer testDeinit(&vmm);
+
+    const attrs = Attributes{ .writable = true, .cachable = true, .kernel = true };
+    // Try allocating at the start
+    std.testing.expectEqual(vmm.alloc(10, vmm.start, attrs), vmm.start);
+    // Try that again
+    std.testing.expectEqual(vmm.alloc(5, vmm.start, attrs), null);
+    const middle = vmm.start + (vmm.end - vmm.start) / 2;
+    // Try allocating at the middle
+    std.testing.expectEqual(vmm.alloc(num_entries / 2, middle, attrs), middle);
+    // Allocating after the start and colliding with the middle should be impossible
+    std.testing.expectEqual(vmm.alloc(num_entries / 2, vmm.start + 10 * BLOCK_SIZE, attrs), null);
+    // Allocating within the last half should be impossible
+    std.testing.expectEqual(vmm.alloc(num_entries / 4, middle + BLOCK_SIZE, attrs), null);
+    // It should still be possible to allocate between the start and middle
+    std.testing.expectEqual(vmm.alloc(num_entries / 2 - 10, vmm.start + 10 * BLOCK_SIZE, attrs), vmm.start + 10 * BLOCK_SIZE);
+    // It should now be full
+    std.testing.expectEqual(vmm.bmp.num_free_entries, 0);
+
+    // Allocating at the end and before the start should fail
+    std.testing.expectEqual(vmm.alloc(1, vmm.end, attrs), null);
+    std.testing.expectEqual(vmm.alloc(1, vmm.start - BLOCK_SIZE, attrs), null);
+}
+
 test "set" {
     const num_entries = 512;
     var vmm = try testInit(num_entries);
