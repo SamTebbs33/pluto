@@ -419,10 +419,15 @@ pub const Elf = struct {
         var section_data = try allocator.alloc(?[]const u8, header.section_header_entries);
         errdefer allocator.free(section_data);
         var sec_offset = header.section_header_offset;
+        log.debug("Loading sections\n", .{});
         for (section_headers) |*section, i| {
+            log.debug("Loading section {} at offset {} within slice of len {}\n", .{ i, sec_offset, elf_data.len });
             section.* = std.mem.bytesToValue(SectionHeader, (elf_data.ptr + sec_offset)[0..@sizeOf(SectionHeader)]);
+            log.debug("a\n", .{});
             section_data[i] = if (section.section_type.hasData()) elf_data[section.offset .. section.offset + section.size] else null;
+            log.debug("b\n", .{});
             sec_offset += header.section_header_entry_size;
+            log.debug("Loaded section {}\n", .{i});
         }
 
         if (section_headers[header.section_name_index].section_type != .StringTable) {

@@ -83,21 +83,18 @@ pub fn build(b: *Builder) !void {
         try ramdisk_files_al.append("test/ramdisk_test1.txt");
         try ramdisk_files_al.append("test/ramdisk_test2.txt");
     } else if (test_mode == .Scheduler) {
-        // Add some test files for the user mode runtime tests
-        const user_program = b.addAssemble("user_program", "test/user_program.s");
-        user_program.setOutputDir(b.cache_root);
-        user_program.setTarget(target);
-        user_program.setBuildMode(build_mode);
-        user_program.strip = true;
-
-        const user_program_format = switch (target.getCpuArch()) {
-            .i386 => "elf32-i386",
-            else => unreachable,
-        };
-        const copy_user_program = b.addSystemCommand(&[_][]const u8{ "objcopy", "-O", user_program_format, "zig-cache/user_program.o", "zig-cache/user_program.elf" });
-        copy_user_program.step.dependOn(&user_program.step);
-        try ramdisk_files_al.append("zig-cache/user_program.elf");
-        exec.step.dependOn(&copy_user_program.step);
+        inline for (&[_][]const u8{"user_program_data"}) |user_program| {
+            // Add some test files for the user mode runtime tests
+            const user_program_step = b.addExecutable(user_program ++ ".elf", null);
+            user_program_step.setLinkerScriptPath("test/user_program.ld");
+            user_program_step.addAssemblyFile("test/" ++ user_program ++ ".s");
+            user_program_step.setOutputDir(b.cache_root);
+            user_program_step.setTarget(target);
+            user_program_step.setBuildMode(build_mode);
+            user_program_step.strip = true;
+            exec.step.dependOn(&user_program_step.step);
+            try ramdisk_files_al.append("zig-cache/" ++ user_program ++ ".elf");
+        }
     }
 
     const ramdisk_step = RamdiskStep.create(b, target, ramdisk_files_al.toOwnedSlice(), ramdisk_path);

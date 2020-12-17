@@ -14,6 +14,7 @@ const vmm = if (is_test) @import(mock_path ++ "vmm_mock.zig") else @import("vmm.
 const mem = if (is_test) @import(mock_path ++ "mem_mock.zig") else @import("mem.zig");
 const fs = @import("filesystem/vfs.zig");
 const elf = @import("elf.zig");
+const pmm = @import("pmm.zig");
 const Task = task.Task;
 const EntryPoint = task.EntryPoint;
 const Allocator = std.mem.Allocator;
@@ -377,16 +378,19 @@ fn rt_user_task(allocator: *Allocator, mem_profile: *const mem.MemProfile) void 
     };
     task_vmm.* = vmm.VirtualMemoryManager(arch.VmmPayload).init(0, @ptrToInt(mem_profile.vaddr_start), allocator, arch.VMM_MAPPER, undefined) catch unreachable;
     // 3. Read the user program file from the filesystem
-    const user_program_file = fs.openFile("/user_program.elf", .NO_CREATION) catch |e| {
+    const user_program_file = fs.openFile("/user_program_data.elf", .NO_CREATION) catch |e| {
         panic(@errorReturnTrace(), "Failed to open /user_program.elf: {}\n", .{e});
     };
     defer user_program_file.close();
-    var code: [1024]u8 = undefined;
-    const code_len = user_program_file.read(code[0..1024]) catch |e| {
+    var code: [1024 * 9]u8 = undefined;
+    const code_len = user_program_file.read(code[0..code.len]) catch |e| {
         panic(@errorReturnTrace(), "Failed to read user program file: {}\n", .{e});
     };
     const program_elf = elf.Elf.init(code[0..code_len], builtin.arch, allocator) catch |e| panic(@errorReturnTrace(), "Failed to load user program elf: {}\n", .{e});
     errdefer program_elf.deinit();
+
+    const current_physical_blocks = pmm.blocksFree();
+
     var user_task = task.Task.createFromElf(program_elf, false, task_vmm, allocator) catch |e| {
         panic(@errorReturnTrace(), "Failed to create user task: {}\n", .{e});
     };
@@ -395,16 +399,18 @@ fn rt_user_task(allocator: *Allocator, mem_profile: *const mem.MemProfile) void 
         panic(@errorReturnTrace(), "Failed to schedule the user task: {}\n", .{e});
     };
 
-    // Only one elf section is expected to have been allocated in the vmm. Amend when more are added
-    if (task_vmm.allocations.count() != 1) {
-        panic(@errorReturnTrace(), "VMM allocated wrong number of virtual regions. Expected {} but found {}\n", .{ 1, task_vmm.allocations.count() });
+    var num_allocatable_sections: usize = 0;
+    var size_allocatable_sections: usize = 0;
+    for (program_elf.section_headers) |section| {
+        if (section.flags & elf.SECTION_ALLOCATABLE != 0) {
+            num_allocatable_sections += 1;
+            size_allocatable_sections += section.size;
+        }
     }
 
-    // Only the minimum number of physical blocks are expected to have been allocated. Amend when more loadable elf sections are added
-    const expected_blocks = std.mem.alignForward(code_len, vmm.BLOCK_SIZE) / vmm.BLOCK_SIZE;
-    const num_blocks = task_vmm.allocations.get(program_elf.header.entry_address).?.physical.items.len;
-    if (num_blocks != expected_blocks) {
-        panic(@errorReturnTrace(), "VMM allocated wrong number of physical blocks. Expected {} but found {}\n", .{ expected_blocks, num_blocks });
+    // Only a certain number of elf section are expected to have been allocated in the vmm
+    if (task_vmm.allocations.count() != num_allocatable_sections) {
+        panic(@errorReturnTrace(), "VMM allocated wrong number of virtual regions. Expected {} but found {}\n", .{ 1, task_vmm.allocations.count() });
     }
 }
 

@@ -110,16 +110,19 @@ pub const Task = struct {
 
         // Iterate over sections
         for (program_elf.section_headers) |header, i| {
+            log.debug("Section {}\n", .{header.getName(program_elf)});
             if ((header.flags & elf.SECTION_ALLOCATABLE) == 0) {
                 continue;
             }
             // If it is loadable then allocate it at its virtual address
             const attrs = vmm.Attributes{ .kernel = kernel, .writable = (header.flags & elf.SECTION_WRITABLE) != 0, .cachable = true };
-            const vaddr = (try task_vmm.alloc(std.mem.alignForward(header.size, vmm.BLOCK_SIZE) / vmm.BLOCK_SIZE, header.virtual_address, attrs)) orelse return if (try task_vmm.isSet(header.virtual_address)) vmm.VmmError.AlreadyAllocated else bitmap.Bitmap(usize).BitmapError.OutOfBounds;
+            log.debug("Allocating {} section with address {X} and attributes {}\n", .{ header.getName(program_elf), header.virtual_address, attrs });
+            const vaddr = (try task_vmm.alloc(std.mem.alignForward(header.size, vmm.BLOCK_SIZE) / vmm.BLOCK_SIZE, header.virtual_address, attrs)) orelse return if (try task_vmm.isSet(header.virtual_address)) error.AlreadyAllocated else error.OutOfBounds;
             errdefer task_vmm.free(vaddr) catch |e| panic(@errorReturnTrace(), "Failed to free VMM memory in createFromElf: {}\n", .{e});
             // Copy it into memory
             try vmm.kernel_vmm.copyData(task_vmm, true, program_elf.section_data[i].?, vaddr);
         }
+        log.debug("Created task with entry point {X}\n", .{program_elf.header.entry_address});
         return task;
     }
 
