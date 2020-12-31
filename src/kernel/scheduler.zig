@@ -389,6 +389,10 @@ fn rt_user_task(allocator: *Allocator, mem_profile: *const mem.MemProfile) void 
     const program_elf = elf.Elf.init(code[0..code_len], builtin.arch, allocator) catch |e| panic(@errorReturnTrace(), "Failed to load user program elf: {}\n", .{e});
     errdefer program_elf.deinit();
 
+    for (program_elf.section_headers) |section, i| {
+        log.debug("Section {}, data: {X}\n", .{ section.getName(program_elf), program_elf.section_data[i] });
+    }
+
     const current_physical_blocks = pmm.blocksFree();
 
     var user_task = task.Task.createFromElf(program_elf, false, task_vmm, allocator) catch |e| {

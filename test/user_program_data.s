@@ -1,7 +1,8 @@
 .section .text
 .globl entry
 entry:
-    nop
+    mov %cr3, %eax
+    mov %eax, %cr3
     mov item1, %eax
     mov item2, %ebx
 loop:

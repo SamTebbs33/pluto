@@ -428,7 +428,7 @@ pub fn VirtualMemoryManager(comptime Payload: type) type {
         /// Arguments:
         ///     IN self: *Self - One of the VMMs to copy between. This should be the currently active VMM
         ///     IN other: *Self - The second of the VMMs to copy between
-        ///     IN from: bool - Whether the date should be copied from `self` to `other`, or the other way around
+        ///     IN from: bool - Whether the data should be copied from `self` to `other`, or the other way around
         ///     IN data: if (from) []const u8 else []u8 - The being copied from or written to (depending on `from`). Must be mapped within the VMM being copied from/to
         ///     IN address: usize - The address within `other` that is to be copied from or to
         ///
@@ -461,7 +461,7 @@ pub fn VirtualMemoryManager(comptime Payload: type) type {
                 }
             }
             // Make sure the address is actually mapped in the destination VMM
-            if (blocks.items.len == 0) {
+            if (blocks.items.len != std.mem.alignForward(data.len, BLOCK_SIZE) / BLOCK_SIZE) {
                 return VmmError.NotAllocated;
             }
 
@@ -1057,5 +1057,36 @@ fn rt_copyData(vmm: *VirtualMemoryManager(arch.VmmPayload)) void {
     };
     if (!std.mem.eql(u8, buff[0..buff.len], buff2)) {
         panic(@errorReturnTrace(), "Data copied from vmm2 doesn't have the expected values\n", .{});
+    }
+
+    // Make sure that a second copy will succeed
+    const addr2 = vmm2.alloc(1, null, .{ .kernel = true, .cachable = true, .writable = true }) catch |e| {
+        panic(@errorReturnTrace(), "Failed to allocate within the secondary VMM in rt_copyData: {}\n", .{e});
+    } orelse panic(@errorReturnTrace(), "Failed to get an allocation within the secondary VMM in rt_copyData\n", .{});
+    defer vmm2.free(addr2) catch |e| {
+        panic(@errorReturnTrace(), "Failed to free the allocation in secondary VMM: {}\n", .{e});
+    };
+    const expected_free_entries3 = vmm2.bmp.num_free_entries;
+    const expected_free_pmm_entries3 = pmm.blocksFree();
+    // Try copying to vmm2
+    var buff3: [6]u8 = [_]u8{ 3, 9, 0, 12, 50, 7 };
+    vmm.copyData(&vmm2, true, buff3[0..buff3.len], addr) catch |e| {
+        panic(@errorReturnTrace(), "Failed to copy third lot of data to secondary VMM in rt_copyData: {}\n", .{e});
+    };
+    // Make sure the function cleaned up
+    if (vmm.bmp.num_free_entries != expected_free_entries) {
+        panic(@errorReturnTrace(), "Expected {} free entries in VMM after third copy, but there were {}\n", .{ expected_free_entries, vmm.bmp.num_free_entries });
+    }
+    if (vmm2.bmp.num_free_entries != expected_free_entries3) {
+        panic(@errorReturnTrace(), "Expected {} free entries in the secondary VMM after third copy, but there were {}\n", .{ expected_free_entries2, vmm2.bmp.num_free_entries });
+    }
+    if (pmm.blocksFree() != expected_free_pmm_entries3) {
+        panic(@errorReturnTrace(), "Expected {} free entries in PMM after third copy, but there were {}\n", .{ expected_free_pmm_entries, pmm.blocksFree() });
+    }
+    // Make sure that the data at the allocated address is correct
+    // Since vmm2 is a mirror of vmm, this address should be mapped by the CPU's MMU
+    const dest_buff2 = @intToPtr([*]u8, addr2)[0..buff3.len];
+    if (!std.mem.eql(u8, buff3[0..buff3.len], dest_buff)) {
+        panic(@errorReturnTrace(), "Third lot of data copied doesn't have the expected values\n", .{});
     }
 }

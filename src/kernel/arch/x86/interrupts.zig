@@ -49,11 +49,7 @@ export fn commonStub() callconv(.Naked) void {
     // If so don't change cr3 to avoid a TLB flush
     asm volatile (
         \\pop   %%eax
-        \\mov   %%cr3, %%ebx
-        \\cmp   %%eax, %%ebx
-        \\je    same_cr3
         \\mov   %%eax, %%cr3
-        \\same_cr3:
         \\pop   %%gs
         \\pop   %%fs
         \\pop   %%es
