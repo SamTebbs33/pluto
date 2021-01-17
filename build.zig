@@ -40,10 +40,10 @@ pub fn build(b: *Builder) !void {
     const arch_root = "src/kernel/arch";
     const constants_path = try fs.path.join(b.allocator, &[_][]const u8{ arch_root, arch, "constants.zig" });
     const linker_script_path = try fs.path.join(b.allocator, &[_][]const u8{ arch_root, arch, "link.ld" });
-    const output_iso = try fs.path.join(b.allocator, &[_][]const u8{ b.exe_dir, "pluto.iso" });
-    const iso_dir_path = try fs.path.join(b.allocator, &[_][]const u8{ b.exe_dir, "iso" });
-    const boot_path = try fs.path.join(b.allocator, &[_][]const u8{ b.exe_dir, "iso", "boot" });
-    const modules_path = try fs.path.join(b.allocator, &[_][]const u8{ b.exe_dir, "iso", "modules" });
+    const output_iso = try fs.path.join(b.allocator, &[_][]const u8{ b.install_path, "pluto.iso" });
+    const iso_dir_path = try fs.path.join(b.allocator, &[_][]const u8{ b.install_path, "iso" });
+    const boot_path = try fs.path.join(b.allocator, &[_][]const u8{ b.install_path, "iso", "boot" });
+    const modules_path = try fs.path.join(b.allocator, &[_][]const u8{ b.install_path, "iso", "modules" });
     const ramdisk_path = try fs.path.join(b.allocator, &[_][]const u8{ b.install_path, "initrd.ramdisk" });
     const fat32_image_path = try fs.path.join(b.allocator, &[_][]const u8{ b.install_path, "fat32.img" });
 
@@ -83,7 +83,7 @@ pub fn build(b: *Builder) !void {
         try ramdisk_files_al.append("test/ramdisk_test1.txt");
         try ramdisk_files_al.append("test/ramdisk_test2.txt");
     } else if (test_mode == .Scheduler) {
-        inline for (&[_][]const u8{"user_program_data"}) |user_program| {
+        inline for (&[_][]const u8{ "user_program_data", "user_program" }) |user_program| {
             // Add some test files for the user mode runtime tests
             const user_program_step = b.addExecutable(user_program ++ ".elf", null);
             user_program_step.setLinkerScriptPath("test/user_program.ld");

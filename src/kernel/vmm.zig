@@ -481,6 +481,7 @@ pub fn VirtualMemoryManager(comptime Payload: type) type {
                     const v_end = v + BLOCK_SIZE;
                     const p = block;
                     const p_end = p + BLOCK_SIZE;
+                    log.debug("COPY: Mapping {X} -> {X} to {X} -> {X}\n", .{ v, v_end, p, p_end });
                     self.mapper.mapFn(v, v_end, p, p_end, .{ .kernel = true, .writable = true, .cachable = true }, self.allocator, self.payload) catch |e| {
                         // If we fail to map one of the blocks then attempt to free all previously mapped
                         if (i > 0) {

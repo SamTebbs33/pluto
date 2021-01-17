@@ -211,6 +211,7 @@ inline fn clearAttribute(val: *align(1) u32, attr: u32) void {
 ///     Allocator.Error.* - See Allocator.alignedAlloc
 ///
 fn mapDirEntry(dir: *Directory, virt_start: usize, virt_end: usize, phys_start: usize, phys_end: usize, attrs: vmm.Attributes, allocator: *Allocator) (vmm.MapperError || Allocator.Error)!void {
+    log.debug("mapDirEntry(dir: {X}, v_start: {X}, v_end: {X}, p_start: {X}, p_end: {X})\n", .{ @ptrToInt(dir), virt_start, virt_end, phys_start, phys_end });
     if (phys_start > phys_end) {
         return vmm.MapperError.InvalidPhysicalAddress;
     }
@@ -240,14 +241,14 @@ fn mapDirEntry(dir: *Directory, virt_start: usize, virt_end: usize, phys_start: 
         table = &(try allocator.alignedAlloc(Table, @truncate(u29, PAGE_SIZE_4KB), 1))[0];
         @memset(@ptrCast([*]u8, table), 0, @sizeOf(Table));
         const table_phys_addr = vmm.kernel_vmm.virtToPhys(@ptrToInt(table)) catch |e| {
-            panic(@errorReturnTrace(), "Failed getting the physical address for an allocated page table: {}\n", .{e});
+            panic(@errorReturnTrace(), "Failed getting the physical address for a page table: {}\n", .{e});
         };
         dir_entry.* |= DENTRY_PAGE_ADDR & table_phys_addr;
         dir.tables[entry] = table;
     }
 
     setAttribute(dir_entry, DENTRY_PRESENT);
-    setAttribute(dir_entry, DENTRY_WRITE_THROUGH);
+    clearAttribute(dir_entry, DENTRY_WRITE_THROUGH);
     clearAttribute(dir_entry, DENTRY_4MB_PAGES);
 
     if (attrs.writable) {
@@ -277,7 +278,8 @@ fn mapDirEntry(dir: *Directory, virt_start: usize, virt_end: usize, phys_start: 
         phys += PAGE_SIZE_4KB;
         tentry += 1;
     }) {
-        try mapTableEntry(&table.entries[tentry], phys, attrs);
+        log.debug("mapTableEntry(dir: {X}, v: {X}, p: {X}, entry: {})\n", .{ @ptrToInt(dir), virt, phys, tentry });
+        try mapTableEntry(dir, &table.entries[tentry], virt, phys, attrs);
     }
 }
 
@@ -301,6 +303,13 @@ fn unmapDirEntry(dir: *Directory, virt_start: usize, virt_end: usize) vmm.Mapper
         var table_entry = &table.entries[virtToTableEntryIdx(addr)];
         if (table_entry.* & TENTRY_PRESENT != 0) {
             clearAttribute(table_entry, TENTRY_PRESENT);
+            if (dir == &kernel_directory) {
+                asm volatile ("invlpg (%[addr])"
+                    :
+                    : [addr] "r" (addr)
+                    : "memory"
+                );
+            }
         } else {
             return vmm.MapperError.NotMapped;
         }
@@ -312,13 +321,17 @@ fn unmapDirEntry(dir: *Directory, virt_start: usize, virt_end: usize) vmm.Mapper
 /// Sets the entry to be present, writable, kernel access, write through, cache enabled, non-global and the page address bits.
 ///
 /// Arguments:
+///     IN dir: *const Directory - The directory that is being mapped within.
+///                           The function checks if this is the kernel directory and if so invalidates the page being mapped so the TLB reloads it.
 ///     OUT entry: *align(1) TableEntry - The entry to map. 1 byte aligned.
+///     IN virt_addr: usize - The virtual address that this table entry is responsible for.
+///                           Used to invalidate the page if mapping within the kernel page directory.
 ///     IN phys_addr: usize - The physical address to map the table entry to.
 ///
 /// Error: PagingError
 ///     PagingError.UnalignedPhysAddresses - If the physical address isn't page size aligned.
 ///
-fn mapTableEntry(entry: *align(1) TableEntry, phys_addr: usize, attrs: vmm.Attributes) vmm.MapperError!void {
+fn mapTableEntry(dir: *const Directory, entry: *align(1) TableEntry, virt_addr: usize, phys_addr: usize, attrs: vmm.Attributes) vmm.MapperError!void {
     if (!std.mem.isAligned(phys_addr, PAGE_SIZE_4KB)) {
         return vmm.MapperError.MisalignedPhysicalAddress;
     }
@@ -333,11 +346,9 @@ fn mapTableEntry(entry: *align(1) TableEntry, phys_addr: usize, attrs: vmm.Attri
     } else {
         setAttribute(entry, TENTRY_USER);
     }
-    if (attrs.writable) {
-        setAttribute(entry, TENTRY_WRITE_THROUGH);
-    } else {
-        clearAttribute(entry, TENTRY_WRITE_THROUGH);
-    }
+
+    clearAttribute(entry, TENTRY_WRITE_THROUGH);
+
     if (attrs.cachable) {
         clearAttribute(entry, TENTRY_CACHE_DISABLED);
     } else {
@@ -345,6 +356,13 @@ fn mapTableEntry(entry: *align(1) TableEntry, phys_addr: usize, attrs: vmm.Attri
     }
     clearAttribute(entry, TENTRY_GLOBAL);
     setAttribute(entry, TENTRY_PAGE_ADDR & phys_addr);
+    if (dir == &kernel_directory) {
+        asm volatile ("invlpg (%[addr])"
+            :
+            : [addr] "r" (virt_addr)
+            : "memory"
+        );
+    }
 }
 
 ///
@@ -367,6 +385,7 @@ fn mapTableEntry(entry: *align(1) TableEntry, phys_addr: usize, attrs: vmm.Attri
 ///     * - See mapDirEntry
 ///
 pub fn map(virtual_start: usize, virtual_end: usize, phys_start: usize, phys_end: usize, attrs: vmm.Attributes, allocator: *Allocator, dir: *Directory) (Allocator.Error || vmm.MapperError)!void {
+    log.debug("map(dir: {X}, v_start: {X}, v_end: {X}, p_start: {X}, p_end: {X})\n", .{ @ptrToInt(dir), virtual_start, virtual_end, phys_start, phys_end });
     var virt_addr = virtual_start;
     var phys_addr = phys_start;
     var virt_next = std.math.min(virtual_end, std.mem.alignBackward(virt_addr, PAGE_SIZE_4MB) + PAGE_SIZE_4MB);

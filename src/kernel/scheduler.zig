@@ -372,49 +372,47 @@ fn rt_variable_preserved(allocator: *Allocator) void {
 ///     IN mem_profile: mem.MemProfile - The system's memory profile. Determines the end address of the user task's VMM.
 ///
 fn rt_user_task(allocator: *Allocator, mem_profile: *const mem.MemProfile) void {
-    // 1. Create user VMM
-    var task_vmm = allocator.create(vmm.VirtualMemoryManager(arch.VmmPayload)) catch |e| {
-        panic(@errorReturnTrace(), "Failed to allocate user task VMM: {}\n", .{e});
-    };
-    task_vmm.* = vmm.VirtualMemoryManager(arch.VmmPayload).init(0, @ptrToInt(mem_profile.vaddr_start), allocator, arch.VMM_MAPPER, undefined) catch unreachable;
-    // 3. Read the user program file from the filesystem
-    const user_program_file = fs.openFile("/user_program_data.elf", .NO_CREATION) catch |e| {
-        panic(@errorReturnTrace(), "Failed to open /user_program.elf: {}\n", .{e});
-    };
-    defer user_program_file.close();
-    var code: [1024 * 9]u8 = undefined;
-    const code_len = user_program_file.read(code[0..code.len]) catch |e| {
-        panic(@errorReturnTrace(), "Failed to read user program file: {}\n", .{e});
-    };
-    const program_elf = elf.Elf.init(code[0..code_len], builtin.arch, allocator) catch |e| panic(@errorReturnTrace(), "Failed to load user program elf: {}\n", .{e});
-    errdefer program_elf.deinit();
+    inline for (&[_][]const u8{"user_program_data.elf"}) |user_program| {
+        // 1. Create user VMM
+        var task_vmm = allocator.create(vmm.VirtualMemoryManager(arch.VmmPayload)) catch |e| {
+            panic(@errorReturnTrace(), "Failed to allocate VMM for " ++ user_program ++ ": {}\n", .{e});
+        };
+        task_vmm.* = vmm.VirtualMemoryManager(arch.VmmPayload).init(0, @ptrToInt(mem_profile.vaddr_start), allocator, arch.VMM_MAPPER, undefined) catch unreachable;
+        // 3. Read the user program file from the filesystem
+        const user_program_file = fs.openFile("/" ++ user_program, .NO_CREATION) catch |e| {
+            panic(@errorReturnTrace(), "Failed to open " ++ user_program ++ ": {}\n", .{e});
+        };
+        defer user_program_file.close();
+        var code: [1024 * 9]u8 = undefined;
+        const code_len = user_program_file.read(code[0..code.len]) catch |e| {
+            panic(@errorReturnTrace(), "Failed to read " ++ user_program ++ ": {}\n", .{e});
+        };
+        const program_elf = elf.Elf.init(code[0..code_len], builtin.arch, allocator) catch |e| panic(@errorReturnTrace(), "Failed to load " ++ user_program ++ ": {}\n", .{e});
+        errdefer program_elf.deinit();
 
-    for (program_elf.section_headers) |section, i| {
-        log.debug("Section {}, data: {X}\n", .{ section.getName(program_elf), program_elf.section_data[i] });
-    }
+        const current_physical_blocks = pmm.blocksFree();
 
-    const current_physical_blocks = pmm.blocksFree();
+        var user_task = task.Task.createFromElf(program_elf, false, task_vmm, allocator) catch |e| {
+            panic(@errorReturnTrace(), "Failed to create task for " ++ user_program ++ ": {}\n", .{e});
+        };
+        // 6. Schedule it
+        scheduleTask(user_task, allocator) catch |e| {
+            panic(@errorReturnTrace(), "Failed to schedule the task for " ++ user_program ++ ": {}\n", .{e});
+        };
 
-    var user_task = task.Task.createFromElf(program_elf, false, task_vmm, allocator) catch |e| {
-        panic(@errorReturnTrace(), "Failed to create user task: {}\n", .{e});
-    };
-    // 6. Schedule it
-    scheduleTask(user_task, allocator) catch |e| {
-        panic(@errorReturnTrace(), "Failed to schedule the user task: {}\n", .{e});
-    };
-
-    var num_allocatable_sections: usize = 0;
-    var size_allocatable_sections: usize = 0;
-    for (program_elf.section_headers) |section| {
-        if (section.flags & elf.SECTION_ALLOCATABLE != 0) {
-            num_allocatable_sections += 1;
-            size_allocatable_sections += section.size;
+        var num_allocatable_sections: usize = 0;
+        var size_allocatable_sections: usize = 0;
+        for (program_elf.section_headers) |section| {
+            if (section.flags & elf.SECTION_ALLOCATABLE != 0) {
+                num_allocatable_sections += 1;
+                size_allocatable_sections += section.size;
+            }
         }
-    }
 
-    // Only a certain number of elf section are expected to have been allocated in the vmm
-    if (task_vmm.allocations.count() != num_allocatable_sections) {
-        panic(@errorReturnTrace(), "VMM allocated wrong number of virtual regions. Expected {} but found {}\n", .{ 1, task_vmm.allocations.count() });
+        // Only a certain number of elf section are expected to have been allocated in the vmm
+        if (task_vmm.allocations.count() != num_allocatable_sections) {
+            panic(@errorReturnTrace(), "VMM allocated wrong number of virtual regions for " ++ user_program ++ ". Expected {} but found {}\n", .{ 1, task_vmm.allocations.count() });
+        }
     }
 }
 
