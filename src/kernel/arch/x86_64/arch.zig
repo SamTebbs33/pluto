@@ -1,6 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.x86_64_arch);
+const gdt = @import("gdt.zig");
+const idt = @import("idt.zig");
 const serial = @import("serial.zig");
 const stivale2 = @import("stivale2.zig");
 const tty = @import("tty.zig");
@@ -439,6 +441,18 @@ pub fn initMem(boot_payload: BootPayload) Allocator.Error!MemProfile {
         .virtual_reserved = reserved_virtual_mem.items,
         .fixed_allocator = mem.fixed_buffer_allocator,
     };
+}
+
+///
+/// Initialise the architecture
+///
+/// Arguments:
+///     IN mem_profile: *const MemProfile - The memory profile of the computer. Used to set up
+///                                         paging.
+///
+pub fn init(mem_profile: *const MemProfile) void {
+    gdt.init();
+    idt.init();
 }
 
 test "" {

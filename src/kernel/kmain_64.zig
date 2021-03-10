@@ -67,6 +67,10 @@ export fn kmain(boot_payload: *const arch.BootPayload) void {
 
     pmm.init(&mem_profile, &fixed_allocator.allocator);
 
+    kmain_log.info("Init arch " ++ @tagName(builtin.arch) ++ "\n", .{});
+    arch.init(&mem_profile);
+    kmain_log.info("Arch init done\n", .{});
+
     @panic("test");
 }
 
